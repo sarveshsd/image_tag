@@ -55,4 +55,5 @@ jobs:
         # Push images to GCR
         docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-frontend:v1
         docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-backend:v1
+        
 
