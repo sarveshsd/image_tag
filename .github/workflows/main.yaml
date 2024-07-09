@@ -45,8 +45,8 @@ jobs:
 
     - name: Build and push Docker images to GCR
       run: |
-        docker build -t devops-fullstack-app-backend:v1 -f backend/Dockerfile .
-        docker build -t devops-fullstack-app-frontend:v1 -f frontend/Dockerfile .
+        docker build -t devops-fullstack-app-backend:v1 -f backend/ Dockerfile
+        docker build -t devops-fullstack-app-frontend:v1 -f frontend/ Dockerfile
 
         # Tag images for GCR
         docker tag devops-fullstack-app-frontend:v1 gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-frontend:v1
@@ -55,5 +55,4 @@ jobs:
         # Push images to GCR
         docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-frontend:v1
         docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-backend:v1
-        
 
