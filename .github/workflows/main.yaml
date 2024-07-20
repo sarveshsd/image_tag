@@ -1,61 +1,77 @@
-name: Build and Push Docker Image to GCR
+name: Deploy to GKE
 
 on:
   push:
     branches:
-      - main  # Trigger on push to main branch
+      - main
       - test
 
 jobs:
-  build:
-    runs-on: self-hosted
+  build-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      PROJECT_ID: semiotic-summer-423513-s2
+      CLUSTER_NAME: tax-nandi-gke
+      ZONE: us-central1
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-    - name: Install Docker
-      run: |
-        sudo apt-get update
-        sudo apt-get install apt-transport-https ca-certificates curl software-properties-common -y
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-        sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-        sudo apt-get update
-        sudo apt-get install docker-ce -y
-        sudo docker --version
-        sudo systemctl enable docker
-        sudo systemctl start docker
-        sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-        sudo chmod +x /usr/local/bin/docker-compose
-        docker-compose --version
-        sudo usermod -aG docker $USER
-        sudo gpasswd -a $USER docker
-        sudo service docker restart
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          version: 'latest'
+          project_id: ${{ env.PROJECT_ID }}
+          service_account_key: ${{ secrets.GCLOUD_AUTH }}
 
-    - name: Login to Google Cloud
-      id: auth
-      uses: google-github-actions/auth@v1
-      with:
-        credentials_json: ${{ secrets.GCP_KEY_FILE }}
+      - name: Setup gcloud auth
+        run: |
+          echo '${{ secrets.GCLOUD_AUTH }}' > gcloud-api-key.json
+          gcloud auth activate-service-account --key-file=gcloud-api-key.json
+          gcloud config set account subhanshu0027@gmail.com
+      - name: Configure Docker for Google Artifact Registry
+        run: gcloud auth configure-docker ${{ env.ZONE }}-docker.pkg.dev
 
-    - name: Configure docker to use the gcloud command-line tool as a credential helper
-      run: |
-        gcloud --quiet auth configure-docker
+      - name: Authenticate to gcloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCLOUD_AUTH }}
 
-    - name: Extract GCP project ID
-      id: project
-      run: echo "::set-output name=id::${{ secrets.GCP_PROJECT_ID }}"
-
-    - name: Build and push Docker images to GCR
-      run: |
-        docker build -t devops-fullstack-app-backend:v1 -f backend/Dockerfile .
-        docker build -t devops-fullstack-app-frontend:v1 -f frontend/Dockerfile .
-
-        # Tag images for GCR
-        docker tag devops-fullstack-app-frontend:v1 gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-frontend:v1
-        docker tag devops-fullstack-app-backend:v1 gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-backend:v1
-
-        # Push images to GCR
-        docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-frontend:v1
-        docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/sarveshsd/devops-fullstack-app-backend:v1
-
+    
+      - name: Configure gcloud
+        run: gcloud config set account subhanshu0027@gmail.com
+      
+      - name: Authenticate to gcloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCLOUD_AUTH }}
+      
+      - name: Build and Submit Image
+        id: build
+        run: |
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          IMAGE_URI=${{ env.ZONE }}-docker.pkg.dev/${{ env.PROJECT_ID }}/keycloak/keycloak:$TIMESTAMP
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          gcloud builds submit --region=${{ env.ZONE }} --tag $IMAGE_URI
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+          curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+          sudo apt update
+          sudo apt-get install google-cloud-sdk-gke-gcloud-auth-plugin kubectl
+      - name: Authenticate kubectl with GKE
+        env:
+          PROJECT_ID: semiotic-summer-423513-s2
+          ZONE: us-central1
+        run: |
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          gcloud container clusters get-credentials tax-nandi-gke --zone $ZONE --project $PROJECT_ID
+      - name: Update Kubernetes Deployment
+        env:
+          DEPLOYMENT_NAME: keycloak
+        run: |
+          kubectl set image deployment/$DEPLOYMENT_NAME keycloak=$IMAGE_URI`
